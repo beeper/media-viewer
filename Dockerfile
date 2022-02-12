@@ -9,7 +9,9 @@ RUN go get
 COPY . /build
 RUN go build -o /usr/bin/mediaviewer
 
-FROM scratch
+FROM alpine
+
+RUN apk add --no-cache ca-certificates
 
 COPY --from=builder /usr/bin/mediaviewer /usr/bin/mediaviewer
 
