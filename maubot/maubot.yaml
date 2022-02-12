@@ -1,0 +1,10 @@
+maubot: 0.1.0
+id: com.beeper.mediaviewer
+version: 0.1.0
+license: AGPL-3.0-or-later
+modules:
+- beepermediaviewer
+main_class: MediaViewerBot
+extra_files:
+- base-config.yaml
+config: true

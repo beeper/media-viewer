@@ -1,0 +1,67 @@
+stages:
+  - build
+  - build docker
+
+build:
+  image: golang:1-alpine
+  stage: build
+  cache:
+    paths:
+      - .cache
+  before_script:
+    - apk add git build-base
+    - mkdir -p .cache
+    - export GOPATH="$CI_PROJECT_DIR/.cache"
+  script:
+    - go build -o mediaviewer
+  artifacts:
+    paths:
+      - mediaviewer
+
+build docker:
+  image: docker:stable
+  stage: build docker
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:latest || true
+    - docker build --pull --cache-from $CI_REGISTRY_IMAGE:latest --tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA . --file Dockerfile.ci
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+    - if [ "$CI_COMMIT_BRANCH" = "main" ]; then docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA $CI_REGISTRY_IMAGE:latest && docker push $CI_REGISTRY_IMAGE:latest; fi
+    - if [ "$CI_COMMIT_BRANCH" != "main" ]; then docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_NAME && docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_NAME; fi
+
+build maubot:
+  variables:
+    PYTHONPATH: /opt/maubot
+  image: dock.mau.dev/maubot/maubot
+  stage: build
+  only:
+    changes:
+      - maubot
+      - .gitlab-ci.yml
+  except:
+    - tags
+  script:
+    - cd maubot
+    - python3 -m maubot.cli build -o xyz.maubot.$CI_PROJECT_NAME-$CI_COMMIT_REF_NAME-$CI_COMMIT_SHORT_SHA.mbp
+  artifacts:
+    paths:
+      - "maubot/*.mbp"
+    expire_in: 365 days
+
+build maubot (tag):
+  variables:
+    PYTHONPATH: /opt/maubot
+  image: dock.mau.dev/maubot/maubot
+  stage: build
+  only:
+    - tags
+  script:
+    - cd maubot
+    - python3 -m maubot.cli build -o xyz.maubot.$CI_PROJECT_NAME-$CI_COMMIT_TAG.mbp
+  artifacts:
+    paths:
+      - "maubot/*.mbp"
+    expire_in: never

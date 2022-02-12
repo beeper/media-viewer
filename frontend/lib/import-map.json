@@ -1,0 +1,6 @@
+{
+  "imports": {
+    "htm/preact": "./htm/preact.js",
+    "matrix-encrypt-attachment": "./matrix-encrypt-attachment.js"
+  }
+}

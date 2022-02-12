@@ -1,0 +1,20 @@
+{
+  "name": "beeper-media-viewer",
+  "version": "0.1.0",
+  "description": "A simple web app that can download, decrypt and display encrypted Matrix media.",
+  "repository": "https://gitlab.com/beeper/media-viewer",
+  "author": "Tulir Asokan <tulir@maunium.net>",
+  "license": "AGPL-3.0-or-later",
+  "private": true,
+  "scripts": {
+    "esinstall": "node ./esinstall.js",
+    "sass": "sass --no-source-map --style=compressed style/"
+  },
+  "dependencies": {
+    "esinstall": "^1.1.7",
+    "htm": "^3.1.0",
+    "matrix-encrypt-attachment": "^1.0.2",
+    "preact": "^10.6.5",
+    "sass": "^1.49.7"
+  }
+}

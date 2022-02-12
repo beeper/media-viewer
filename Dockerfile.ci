@@ -1,0 +1,9 @@
+FROM scratch
+
+COPY ./mediaviewer /usr/bin/mediaviewer
+
+VOLUME /data
+ENV BMV_DATABASE_DRIVER="sqlite3" BMV_DATABASE_URL="/data/beeper-media-viewer.db"
+EXPOSE 29333
+
+CMD ["/usr/bin/mediaviewer"]
