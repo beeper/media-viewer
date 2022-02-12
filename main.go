@@ -137,7 +137,7 @@ func createShortcut(w http.ResponseWriter, r *http.Request) {
 	} else if err = fm.Decode(); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("Failed to decode metadata: %v", err))
 	} else if err = fm.ResolveHomeserver(); err != nil {
-		log.Printf("Failed to create shortcut for %s requested by %s: %v", fm.MXC, readUserIP(r), err)
+		log.Printf("Failed to resolve homeserver of %s requested by %s: %v", fm.MXC, readUserIP(r), err)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to resolve homeserver URL: %w", err))
 	} else if shortcut, err := db.CreateShortcut(&fm); err != nil {
 		log.Printf("Failed to create shortcut requested by %s: %v", readUserIP(r), err)
