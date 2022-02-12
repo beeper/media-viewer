@@ -3,17 +3,16 @@ stages:
   - build docker
 
 build:
-  image: golang:1-alpine
+  image: dock.mau.dev/tulir/gomuks-build-docker:linux-amd64
   stage: build
   cache:
     paths:
       - .cache
   before_script:
-    - apk add git build-base
     - mkdir -p .cache
     - export GOPATH="$CI_PROJECT_DIR/.cache"
   script:
-    - go build -o mediaviewer
+    - go build -ldflags "-linkmode external -extldflags -static" -o mediaviewer
   artifacts:
     paths:
       - mediaviewer
