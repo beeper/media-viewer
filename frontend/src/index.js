@@ -41,7 +41,7 @@ class App extends Component {
 	}
 
 	async deriveKeys() {
-		if (!this.rawMasterKey) {
+		if (!this.rawMasterKey?.length) {
 			throw new CaughtError("Invalid URL: missing decryption key")
 		}
 		const masterKey = await crypto.subtle.importKey(
@@ -61,7 +61,7 @@ class App extends Component {
 		this.infoIV = await crypto.subtle.deriveBits(
 			{name: "HKDF", hash: "SHA-512", salt: new ArrayBuffer(), info: new TextEncoder().encode("initialization")},
 			masterKey,
-			128,
+			96,
 		)
 		const authToken = await crypto.subtle.deriveBits(
 			{name: "HKDF", hash: "SHA-512", salt: new ArrayBuffer(), info: new TextEncoder().encode("authentication")},

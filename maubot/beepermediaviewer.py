@@ -55,7 +55,7 @@ class MediaViewerBot(Plugin):
 
         salt = b""
         encryption_key = HKDF(secret, 32, salt, SHA512, context=b"encryption")
-        iv = HKDF(secret, 16, salt, SHA512, context=b"initialization")
+        iv = HKDF(secret, 12, salt, SHA512, context=b"initialization")
         auth_token = HKDF(secret, 32, salt, SHA512, context=b"authentication")
 
         payload = evt.content.json().encode("utf-8")
