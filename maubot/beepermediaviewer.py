@@ -15,11 +15,13 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from __future__ import annotations
 
-import unpaddedbase64
-import hashlib
-import hmac
 
 from yarl import URL
+from Crypto.Protocol.KDF import HKDF
+from Crypto.Cipher import AES
+from Crypto.Hash import SHA512
+from Crypto.Random import get_random_bytes
+import unpaddedbase64
 
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 from mautrix.types import EventType
@@ -48,23 +50,26 @@ class MediaViewerBot(Plugin):
         if evt.sender == self.client.mxid or not evt.content.msgtype.is_media or not evt.content.file:
             return
 
-        key_raw = unpaddedbase64.decode_base64(evt.content.file.key.key)
-        key_hash = unpaddedbase64.encode_base64(hashlib.sha256(key_raw).digest())
+        secret = get_random_bytes(16)
+        urlsafe_secret = unpaddedbase64.encode_base64(secret, urlsafe=True)
+
+        salt = b""
+        encryption_key = HKDF(secret, 32, salt, SHA512, context=b"encryption")
+        iv = HKDF(secret, 16, salt, SHA512, context=b"initialization")
+        auth_token = HKDF(secret, 32, salt, SHA512, context=b"authentication")
+
+        payload = evt.content.json().encode("utf-8")
+        cipher = AES.new(encryption_key, AES.MODE_GCM, nonce=iv)
+        ciphertext = cipher.encrypt(payload)
+        ciphertext += cipher.digest()
+
+        _, homeserver = self.client.parse_user_id(evt.sender)
 
         req = {
-            "iv": evt.content.file.iv,
-            "sha256": evt.content.file.hashes["sha256"],
-            "url": evt.content.file.url,
-            "info": evt.content.info.serialize(),
-            "key_sha256": key_hash,
+            "ciphertext": unpaddedbase64.encode_base64(ciphertext),
+            "auth_token": unpaddedbase64.encode_base64(auth_token),
+            "homeserver": homeserver,
         }
-        signature_content = req["url"] + req["sha256"] + req["iv"]
-        signature = hmac.new(key_raw, signature_content.encode("utf-8"), hashlib.sha256).digest()
-        req["signature"] = unpaddedbase64.encode_base64(signature)
-        req["info"]["filename"] = evt.content.body
-        # We don't care about thumbnails
-        req["info"].pop("thumbnail_file", None)
-        req["info"].pop("thumbnail_info", None)
         try:
             resp = await self.http.post(self.bmv_url / "create", json=req)
             resp_data = await resp.json()
@@ -75,7 +80,7 @@ class MediaViewerBot(Plugin):
             self.log.warning(f"Failed to create media viewer URL: {type(err).__name__}: {err}")
             await evt.reply("Error requesting media viewer URL, see logs for details")
             return
-        await evt.reply(str((self.bmv_url / file_id).with_fragment(evt.content.file.key.key)))
+        await evt.reply(str((self.bmv_url / file_id).with_fragment(urlsafe_secret)))
 
     @classmethod
     def get_config_class(cls) -> type[BaseProxyConfig]:

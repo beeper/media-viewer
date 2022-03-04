@@ -137,7 +137,7 @@ func createShortcut(w http.ResponseWriter, r *http.Request) {
 	} else if err = fm.Decode(); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("Failed to decode metadata: %v", err))
 	} else if err = fm.ResolveHomeserver(); err != nil {
-		log.Printf("Failed to resolve homeserver of %s requested by %s: %v", fm.MXC, readUserIP(r), err)
+		log.Printf("Failed to resolve homeserver address of %s requested by %s: %v", fm.HomeserverDomain, readUserIP(r), err)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to resolve homeserver URL: %w", err))
 	} else if shortcut, err := db.CreateShortcut(&fm); err != nil {
 		log.Printf("Failed to create shortcut requested by %s: %v", readUserIP(r), err)
@@ -162,8 +162,8 @@ func serveShortcutMetadata(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to get file details")
 	} else if shortcut == nil {
 		writeError(w, http.StatusNotFound, "File not found")
-	} else if keyHash := strings.TrimPrefix(r.Header.Get("Authorization"), "X-Key-Hash "); keyHash != shortcut.KeySHA256 {
-		writeError(w, http.StatusUnauthorized, "Incorrect encryption key hash")
+	} else if derivedAuthKey := strings.TrimPrefix(r.Header.Get("Authorization"), "X-Derived-Key "); derivedAuthKey != shortcut.AuthToken {
+		writeError(w, http.StatusUnauthorized, "Incorrect authentication key")
 	} else {
 		w.Header().Add("Content-Type", "application/json")
 		err = json.NewEncoder(w).Encode(shortcut.GetOutputFormat())

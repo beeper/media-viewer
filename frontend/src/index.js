@@ -29,66 +29,89 @@ class App extends Component {
 			fileMeta: null,
 		}
 		this.saveLinkRef = null
-		this.key = {
-			kty: "oct",
-			key_ops: ["encrypt", "decrypt"],
-			alg: "A256CTR",
-			k: window.location.hash.replace("#", ""),
-			ext: true,
-		}
+		this.infoEncryptionKey = null
+		this.infoIV = null
+		this.infoAuthToken = null
 		try {
-			this.decodedKey = decodeBase64(this.key.k.replaceAll("-", "+").replaceAll("_", "/"))
+			this.rawMasterKey = decodeBase64(window.location.hash.replace("#", "").replaceAll("-", "+").replaceAll("_", "/"))
 		} catch (err) {
 			console.error(err)
 			this.state.error = "Invalid decryption key"
 		}
 	}
 
-	async generateFileMetaSignature(meta) {
-		const key = await crypto.subtle.importKey("raw", this.decodedKey.buffer, {
-			name: "HMAC",
-			hash: "SHA-256",
-		}, true, ["sign"])
-		const msg = new TextEncoder().encode(meta.url + meta.sha256 + meta.iv)
-		const sig = await crypto.subtle.sign("HMAC", key, msg)
-		return encodeBase64(new Uint8Array(sig))
+	async deriveKeys() {
+		if (!this.rawMasterKey) {
+			throw new CaughtError("Invalid URL: missing decryption key")
+		}
+		const masterKey = await crypto.subtle.importKey(
+			"raw",
+			this.rawMasterKey.buffer,
+			"HKDF",
+			false,
+			["deriveKey", "deriveBits"],
+		)
+		this.infoEncryptionKey = await crypto.subtle.deriveKey(
+			{name: "HKDF", hash: "SHA-512", salt: new ArrayBuffer(), info: new TextEncoder().encode("encryption")},
+			masterKey,
+			{name: "AES-GCM", length: 256},
+			false,
+			["decrypt"],
+		)
+		this.infoIV = await crypto.subtle.deriveBits(
+			{name: "HKDF", hash: "SHA-512", salt: new ArrayBuffer(), info: new TextEncoder().encode("initialization")},
+			masterKey,
+			128,
+		)
+		const authToken = await crypto.subtle.deriveBits(
+			{name: "HKDF", hash: "SHA-512", salt: new ArrayBuffer(), info: new TextEncoder().encode("authentication")},
+			masterKey,
+			256,
+		)
+		this.infoAuthToken = encodeBase64(new Uint8Array(authToken))
 	}
 
 	async downloadFileMeta() {
-		if (!this.key.k) {
-			throw new CaughtError("Invalid URL: missing decryption key")
-		}
 		this.setState({ status: "Fetching file metadata" })
-		const keyHashRaw = await crypto.subtle.digest("SHA-256", this.decodedKey.buffer)
-		const keyHashString = encodeBase64(new Uint8Array(keyHashRaw))
-		let fileMetaResp, fileMeta
+		let fileMetaResp, encryptedFileMeta
 		try {
 			const metaURL = new URL(window.location)
 			metaURL.hash = ""
 			metaURL.pathname += "/metadata.json"
-			console.log("Downloading metadata from", metaURL, "with key hash", keyHashString)
+			console.log("Downloading metadata from", metaURL, "with auth token", this.infoAuthToken)
 			fileMetaResp = await fetch(metaURL.toString(), {
-				headers: { Authorization: `X-Key-Hash ${keyHashString}` },
+				headers: { Authorization: `X-Derived-Key ${this.infoAuthToken}` },
 			})
-			fileMeta = await fileMetaResp.json()
+			encryptedFileMeta = await fileMetaResp.json()
 		} catch (err) {
 			console.error("Error fetching file metadata:", err)
 			throw new CaughtError(`Error fetching file metadata: ${err}`)
 		}
 		if (fileMetaResp.status >= 400) {
-			throw new CaughtError(fileMeta?.message ?? `Failed to fetch file metadata: HTTP ${fileMetaResp.status}`)
+			throw new CaughtError(encryptedFileMeta?.message ?? `Failed to fetch file metadata: HTTP ${fileMetaResp.status}`)
 		}
-		const sig = await this.generateFileMetaSignature(fileMeta)
-		if (sig !== fileMeta.signature) {
-			console.log("Mismatching metadata signature. Expected:", sig, "- got:", fileMeta.signature)
-			throw new CaughtError("Mismatching signature in file metadata")
+		return encryptedFileMeta
+	}
+
+	async decryptFileMeta(encryptedFileMeta) {
+		this.setState({ status: "Decrypting file metadata" })
+		const decrypted = await crypto.subtle.decrypt(
+			{name: "AES-GCM", iv: this.infoIV},
+			this.infoEncryptionKey,
+			decodeBase64(encryptedFileMeta.ciphertext),
+		)
+		const fileMeta = JSON.parse(new TextDecoder().decode(decrypted))
+		if (!fileMeta.file?.url) {
+			throw new CaughtError("Invalid file metadata")
 		}
+		fileMeta.homeserver_url = encryptedFileMeta.homeserver_url
+		console.log("Decrypted and parsed file metadata:", fileMeta)
 		return fileMeta
 	}
 
 	async downloadFile(fileMeta) {
 		this.setState({ status: "Downloading file" })
-		const mediaID = fileMeta.url.slice("mxc://".length)
+		const mediaID = fileMeta.file.url.slice("mxc://".length)
 		const url = `${fileMeta.homeserver_url}/_matrix/media/v3/download/${mediaID}`
 		let fileResp
 		console.log("Downloading file from", url)
@@ -108,7 +131,7 @@ class App extends Component {
 			throw new CaughtError(`Error downloading file: HTTP status ${fileResp.status}`)
 		}
 		const reader = fileResp.body.getReader()
-		const contentLength = +fileResp.headers.get("Content-Length") || fileMeta.info.size
+		const contentLength = +fileResp.headers.get("Content-Length") || fileMeta.info?.size
 
 		let receivedLength = 0
 		const chunks = []
@@ -135,14 +158,7 @@ class App extends Component {
 		console.log("Decrypting file...")
 		let decrypted
 		try {
-			decrypted = await decryptAttachment(await blob.arrayBuffer(), {
-				key: this.key,
-				iv: fileMeta.iv,
-				v: "v2",
-				hashes: {
-					sha256: fileMeta.sha256,
-				},
-			})
+			decrypted = await decryptAttachment(await blob.arrayBuffer(), fileMeta.file)
 		} catch (err) {
 			console.error("Failed to decrypt file:", err)
 			throw new CaughtError(`Error decrypting file: ${err.message}`)
@@ -161,7 +177,9 @@ class App extends Component {
 	}
 
 	componentDidMount() {
-		this.downloadFileMeta()
+		this.deriveKeys()
+			.then(() => this.downloadFileMeta())
+			.then(encryptedFileMeta => this.decryptFileMeta(encryptedFileMeta))
 			.then(fileMeta => this.setState({ fileMeta }))
 			.catch(err => this.catchError(err))
 	}
@@ -196,15 +214,8 @@ class App extends Component {
 	}
 
 	getFileClass() {
-		const mimePrefix = this.state.fileMeta?.info?.mimetype?.split("/")[0]
-		switch (mimePrefix) {
-			case "image":
-			case "audio":
-			case "video":
-				return mimePrefix
-			default:
-				return "file"
-		}
+		const msgtype = this.state.fileMeta?.msgtype ?? "m.file"
+		return msgtype.startsWith("m.") ? msgtype.slice(2) : msgtype
 	}
 
 	getFileSize() {
@@ -217,7 +228,7 @@ class App extends Component {
 		} else if (!this.state.fileMeta.info?.size) {
 			return "unknown size"
 		}
-		let size = this.state.fileMeta?.info?.size
+		let size = this.state.fileMeta.info.size
 		if (size < 1000) {
 			return `${size} bytes`
 		} else if (size < 1000 ** 2) {
@@ -236,7 +247,7 @@ class App extends Component {
 			}
 			return "Loading..."
 		}
-		return this.state.fileMeta.info?.filename || `unnamed ${this.getFileClass()}`
+		return this.state.fileMeta.body || `unnamed ${this.getFileClass()}`
 	}
 
 	downloadOrSave() {
@@ -295,16 +306,15 @@ const ObjectViewer = ({ blobURL, fileMeta }) => {
 		return null
 	}
 
-	const info = fileMeta.info
-	if (info.mimetype.startsWith("image/")) {
+	if (fileMeta.msgtype === "m.image") {
 		return html`
-			<img src="${blobURL}" alt="${info.filename || "image"}" width=${info.w} height=${info.h}/>
+			<img src="${blobURL}" alt="${fileMeta.body || "image"}" width=${fileMeta.info?.w} height=${fileMeta.info?.h}/>
 		`
-	} else if (info.mimetype.startsWith("video/")) {
+	} else if (fileMeta.msgtype === "m.video") {
 		return html`
-			<video controls src="${blobURL}" width=${info.w} height=${info.h}/>
+			<video controls src="${blobURL}" width=${fileMeta.info?.w} height=${fileMeta.info?.h}/>
 		`
-	} else if (info.mimetype.startsWith("audio/")) {
+	} else if (fileMeta.msgtype === "m.audio") {
 		return html`
 			<audio controls src="${blobURL}"/>
 		`
@@ -323,7 +333,7 @@ const ObjectViewer = ({ blobURL, fileMeta }) => {
 const SaveButton = ({ blobURL, fileMeta, anchorRef, children }) => {
 	return html`
 		<a target="_blank"
-		   download=${fileMeta ? (fileMeta.info?.filename || "") : undefined}
+		   download=${fileMeta ? (fileMeta.body || "") : undefined}
 		   href="${blobURL}"
 		   class="save-button"
 		   title="Save file to disk"

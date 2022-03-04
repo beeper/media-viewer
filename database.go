@@ -19,7 +19,6 @@ package main
 import (
 	"database/sql"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -34,16 +33,17 @@ type Database struct {
 type upgrade func(*sql.Tx) error
 
 var upgrades = []upgrade{
+	func(tx *sql.Tx) error { return nil },
 	func(tx *sql.Tx) error {
-		_, err := tx.Exec(`CREATE TABLE shortcut (
+		_, err := tx.Exec("DROP TABLE IF EXISTS shortcut")
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(`CREATE TABLE shortcut (
 			shortcut   TEXT  PRIMARY KEY,
-			mxc_uri    TEXT  NOT NULL,
 			homeserver TEXT  NOT NULL,
-			sha256     bytea NOT NULL,
-			iv         bytea NOT NULL,
-			key_sha256 bytea NOT NULL,
-			signature  bytea NOT NULL,
-			info       jsonb NOT NULL
+			auth_token bytea NOT NULL,
+			ciphertext bytea NOT NULL
 		)`)
 		return err
 	},
@@ -122,8 +122,8 @@ func makeSnowflakeishID() string {
 }
 
 const (
-	insertShortcutQuery = "INSERT INTO shortcut (shortcut, mxc_uri, homeserver, sha256, iv, key_sha256, signature, info) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
-	findShortcutQuery   = "SELECT mxc_uri, homeserver, sha256, iv, key_sha256, signature, info FROM shortcut WHERE shortcut=$1"
+	insertShortcutQuery = "INSERT INTO shortcut (shortcut, homeserver, auth_token, ciphertext) VALUES ($1, $2, $3, $4)"
+	findShortcutQuery   = "SELECT homeserver, auth_token, ciphertext FROM shortcut WHERE shortcut=$1"
 )
 
 func (db *Database) CreateShortcut(metadata *FileMetadata) (string, error) {
@@ -133,7 +133,7 @@ func (db *Database) CreateShortcut(metadata *FileMetadata) (string, error) {
 	shortcut := makeSnowflakeishID()
 	_, err := db.Exec(
 		insertShortcutQuery,
-		shortcut, metadata.MXC, metadata.HomeserverURL, metadata.sha256Bytes, metadata.ivBytes, metadata.keySHA256Bytes, metadata.signatureBytes, string(metadata.infoBytes),
+		shortcut, metadata.HomeserverURL, metadata.authTokenBytes, metadata.ciphertextBytes,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to insert shortcut: %w", err)
@@ -142,26 +142,17 @@ func (db *Database) CreateShortcut(metadata *FileMetadata) (string, error) {
 }
 
 func (db *Database) FindShortcut(shortcut string) (*FileMetadata, error) {
-	var mxc, homeserver, info string
-	var sha256, iv, keySHA256, signature []byte
+	var fm FileMetadata
 	err := db.
 		QueryRow(findShortcutQuery, shortcut).
-		Scan(&mxc, &homeserver, &sha256, &iv, &keySHA256, &signature, &info)
+		Scan(&fm.HomeserverURL, &fm.authTokenBytes, &fm.ciphertextBytes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
-	var fm FileMetadata
-	fm.MXC = mxc
-	fm.HomeserverURL = homeserver
-	fm.SHA256 = base64.RawStdEncoding.EncodeToString(sha256)
-	fm.IV = base64.RawStdEncoding.EncodeToString(iv)
-	fm.KeySHA256 = base64.RawStdEncoding.EncodeToString(keySHA256)
-	fm.Signature = base64.RawStdEncoding.EncodeToString(signature)
-	err = json.Unmarshal([]byte(info), &fm.Info)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal info: %w", err)
-	}
+	fm.decoded = true
+	fm.AuthToken = base64.RawStdEncoding.EncodeToString(fm.authTokenBytes)
+	fm.Ciphertext = base64.RawStdEncoding.EncodeToString(fm.ciphertextBytes)
 	return &fm, nil
 }
