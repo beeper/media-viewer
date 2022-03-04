@@ -22,7 +22,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -91,6 +93,16 @@ func (fm *FileMetadata) ResolveHomeserver() error {
 	defer wellKnownCacheLock.Unlock()
 	if cached, ok := wellKnownCache[fm.HomeserverDomain]; ok && cached.FetchedAt.Add(wellKnownCacheTime).After(time.Now()) {
 		fm.HomeserverURL = cached.Homeserver.BaseURL
+		return nil
+	}
+
+	overrideURL, found := os.LookupEnv("BMV_CLIENT_API_OVERRIDE_" + strings.ReplaceAll(strings.ToUpper(fm.HomeserverDomain), ".", "_"))
+	if found {
+		fm.HomeserverURL = overrideURL
+		var resp WellKnownResponse
+		resp.Homeserver.BaseURL = overrideURL
+		resp.FetchedAt = time.Now()
+		wellKnownCache[fm.HomeserverDomain] = resp
 		return nil
 	}
 
