@@ -79,6 +79,8 @@ var wellKnownCacheLock sync.Mutex
 
 const wellKnownCacheTime = 24 * time.Hour
 
+var envTranslate = strings.NewReplacer(".", "_", "-", "_")
+
 func (fm *FileMetadata) ResolveHomeserver() error {
 	if !forceDefaultHomeserver && len(fm.HomeserverURL) > 0 {
 		return nil
@@ -96,7 +98,7 @@ func (fm *FileMetadata) ResolveHomeserver() error {
 		return nil
 	}
 
-	overrideURL, found := os.LookupEnv("BMV_CLIENT_API_OVERRIDE_" + strings.ReplaceAll(strings.ToUpper(fm.HomeserverDomain), ".", "_"))
+	overrideURL, found := os.LookupEnv("BMV_CLIENT_API_OVERRIDE_" + envTranslate.Replace(strings.ToUpper(fm.HomeserverDomain)))
 	if found {
 		fm.HomeserverURL = overrideURL
 		var resp WellKnownResponse
