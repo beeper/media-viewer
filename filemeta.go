@@ -79,7 +79,7 @@ var wellKnownCacheLock sync.Mutex
 
 const wellKnownCacheTime = 24 * time.Hour
 
-var envTranslate = strings.NewReplacer(".", "_", "-", "_")
+var envTranslate = strings.NewReplacer(".", "_", "-", "_", ":", "_")
 
 func (fm *FileMetadata) ResolveHomeserver() error {
 	if !forceDefaultHomeserver && len(fm.HomeserverURL) > 0 {
