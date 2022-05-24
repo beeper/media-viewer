@@ -18,6 +18,8 @@ import { decodeBase64, decryptAttachment, encodeBase64 } from "../lib/matrix-enc
 
 class CaughtError extends Error {}
 
+const MAX_AUTODOWNLOAD_SIZE = 20 * 1024 * 1024 // 20 MiB
+
 class App extends Component {
 	constructor(props) {
 		super(props)
@@ -181,6 +183,7 @@ class App extends Component {
 			.then(() => this.downloadFileMeta())
 			.then(encryptedFileMeta => this.decryptFileMeta(encryptedFileMeta))
 			.then(fileMeta => this.setState({ fileMeta }))
+			.then(() => this.state.fileMeta?.info?.size <= MAX_AUTODOWNLOAD_SIZE && this.downloadAndDecryptFile())
 			.catch(err => this.catchError(err))
 	}
 
