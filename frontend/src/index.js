@@ -314,8 +314,20 @@ const ObjectViewer = ({ blobURL, fileMeta }) => {
 			<img src="${blobURL}" alt="${fileMeta.body || "image"}" width=${fileMeta.info?.w} height=${fileMeta.info?.h}/>
 		`
 	} else if (fileMeta.msgtype === "m.video") {
+		const autoplay = fileMeta.info?.["fi.mau.autoplay"] || false
+		const hideControls = fileMeta.info?.["fi.mau.hide_controls"] || false
+		const loop = fileMeta.info?.["fi.mau.loop"] || false
+		const noAudio = fileMeta.info?.["fi.mau.no_audio"] || false
 		return html`
-			<video controls src="${blobURL}" width=${fileMeta.info?.w} height=${fileMeta.info?.h}/>
+			<video
+				controls=${!hideControls}
+				loop=${loop}
+				autoplay=${autoplay}
+				muted=${noAudio || autoplay}
+				src="${blobURL}"
+				width=${fileMeta.info?.w}
+				height=${fileMeta.info?.h}
+			/>
 		`
 	} else if (fileMeta.msgtype === "m.audio") {
 		return html`
